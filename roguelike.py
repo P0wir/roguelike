@@ -12,6 +12,9 @@ TILE_SIZE = 32
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GRAY = (100, 100, 100)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
 
 # Ustawienia ekranu
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -28,12 +31,69 @@ class Player:
         self.max_hp = 100
         self.damage = 10
         self.attack_speed = 1
-        self.defense = 5
+        self.defense = 0
         self.last_shoot_time = 0  # Czas ostatniego strzału
         self.last_move_time = 0  # Czas ostatniego ruchu
+        self.last_damage_time = 0
 
         # Wygląd
         self.color = (0, 255, 0)
+        # Doświadczenie
+        self.exp = 0
+        self.level = 1
+        self.next_level_exp = 100
+
+        # Wygląd
+        self.color = GREEN
+
+    def gain_exp(self, amount):
+        """Zdobywanie doświadczenia"""
+        self.exp += amount
+        if self.exp >= self.next_level_exp:
+            self.level_up()
+
+    def level_up(self):
+        """Awans na kolejny poziom"""
+        self.exp -= self.next_level_exp
+        self.level += 1
+        self.next_level_exp += 50  # Zwiększ wymagane EXP do następnego poziomu
+        self.show_level_up_dialog()
+
+    def show_level_up_dialog(self):
+        """Wyświetlanie okna dialogowego wyboru nagrody"""
+        font = pygame.font.Font(None, 36)
+        running = True
+        while running:
+            screen.fill(BLACK)
+
+            # Wyświetlanie opcji
+            text = font.render("Level Up! Choose an upgrade:", True, WHITE)
+            dmg_text = font.render("1: Increase Damage (+5)", True, WHITE)
+            hp_text = font.render("2: Increase Max HP (+5)", True, WHITE)
+            speed_text = font.render("3: Increase Attack Speed (+0.2)", True, WHITE)
+
+            screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 100))
+            screen.blit(dmg_text, (WIDTH // 2 - dmg_text.get_width() // 2, HEIGHT // 2 - 50))
+            screen.blit(hp_text, (WIDTH // 2 - hp_text.get_width() // 2, HEIGHT // 2))
+            screen.blit(speed_text, (WIDTH // 2 - speed_text.get_width() // 2, HEIGHT // 2 + 50))
+
+            pygame.display.flip()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    exit()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_1:
+                        self.damage += 5
+                        running = False
+                    elif event.key == pygame.K_2:
+                        self.max_hp += 5
+                        self.hp += 5
+                        running = False
+                    elif event.key == pygame.K_3:
+                        self.attack_speed += 0.2
+                        running = False
 
     def shoot(self, projectiles, direction):
         """Strzelanie pociskami w określonym kierunku"""
@@ -63,6 +123,7 @@ class Player:
         """Metoda do otrzymywania obrażeń"""
         reduced_damage = max(damage - self.defense, 0)  # Obrona zmniejsza obrażenia
         self.hp -= reduced_damage
+        print(f"Gracz otrzymał obrażenia: {reduced_damage}, HP: {self.hp}/{self.max_hp}")
         if self.hp <= 0:
             self.hp = 0
             print("Gracz zginął!")
@@ -89,6 +150,14 @@ class Player:
     def draw(self, surface):
         """Rysowanie gracza na ekranie"""
         pygame.draw.rect(surface, self.color, (self.x * TILE_SIZE, self.y * TILE_SIZE, TILE_SIZE, TILE_SIZE))
+        # Rysowanie paska HP
+        pygame.draw.rect(surface, RED, (self.x * TILE_SIZE, self.y * TILE_SIZE - 10, TILE_SIZE, 5))
+        pygame.draw.rect(surface, GREEN, (self.x * TILE_SIZE, self.y * TILE_SIZE - 10, TILE_SIZE * (self.hp / self.max_hp), 5))
+        # Rysowanie paska EXP
+        pygame.draw.rect(surface, WHITE, (10, HEIGHT - 20, WIDTH - 20, 10))
+        pygame.draw.rect(surface, YELLOW, (10, HEIGHT - 20, (WIDTH - 20) * (self.exp / self.next_level_exp), 10))
+
+
 class Enemy:
     def __init__(self, x, y, hp, damage):
         self.x = x
@@ -269,12 +338,22 @@ def main():
         for projectile in projectiles[:]:
             for enemy in enemies:
                 if abs(projectile.x - (enemy.x * TILE_SIZE + TILE_SIZE // 2)) < TILE_SIZE // 2 and \
-                   abs(projectile.y - (enemy.y * TILE_SIZE + TILE_SIZE // 2)) < TILE_SIZE // 2:
+                        abs(projectile.y - (enemy.y * TILE_SIZE + TILE_SIZE // 2)) < TILE_SIZE // 2:
                     enemy.take_damage(player.damage)
-                    if enemy.hp <= 0:
+                    if enemy.hp <= 0:  # Sprawdzamy, czy przeciwnik zginął
+                        player.gain_exp(20)  # EXP za zabicie przeciwnika
                         enemies.remove(enemy)
                     projectiles.remove(projectile)
                     break
+
+        # Kolizje gracza z przeciwnikami
+        current_time = pygame.time.get_ticks()
+        for enemy in enemies:
+            if player.x == enemy.x and player.y == enemy.y:  # Jeśli współrzędne są takie same
+                if current_time - player.last_damage_time >= 1000:  # Obrażenia co 1 sekundę
+                    player.take_damage(enemy.damage)  # Zadanie obrażeń
+                    player.last_damage_time = current_time  # Aktualizacja czasu ostatnich obrażeń
+                    print(f"Gracz otrzymał {enemy.damage} obrażeń! HP: {player.hp}/{player.max_hp}")
 
         # Rysowanie
         draw_map(screen, game_map)

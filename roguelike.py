@@ -69,16 +69,88 @@ class Player:
         self.holy_water_damage = 0  # Bazowe obrażenia Holy Water
         self.holy_water_aoe = TILE_SIZE  # Obszar działania Holy Water
         self.last_holy_water_time = 0  # Czas ostatniego rzutu Holy Water
+        self.inventory = {"weapons": [], "shield": None}  # Ekwipunek gracza
+        self.equipped_weapon = None  # Aktualnie wyposażona broń
 
         # Doświadczenie
         self.exp = 0
         self.level = 1
         self.next_level_exp = 100
 
-        # Załaduj obraz gracza
-        self.image = pygame.image.load("23.png").convert_alpha()
-        self.image = pygame.transform.scale(self.image, (TILE_SIZE*3, TILE_SIZE*3))  # Dopasuj do TILE_SIZE
+        # Rozmiar docelowy dla wszystkich obrazów
+        self.target_size = (TILE_SIZE * 2, TILE_SIZE * 2)
 
+        # Animacja chodzenia
+        self.walk_frames = [
+            pygame.transform.scale(
+                pygame.image.load(f"walk{i}.png").convert_alpha(), self.target_size
+            )
+            for i in range(1, 7)
+        ]
+        self.current_frame = 0
+        self.image = self.walk_frames[0]  # Początkowy obraz
+        self.animation_speed = 100  # Prędkość zmiany klatek (ms)
+        self.last_frame_time = pygame.time.get_ticks()
+        self.facing_left = False
+
+        # Obraz w stanie bezruchu
+        self.idle_image = pygame.transform.scale(
+            pygame.image.load("idle.png").convert_alpha(), self.target_size
+        )
+
+    def update_animation(self, moving):
+        """Aktualizuje animację gracza."""
+        if moving:  # Animacja chodzenia
+            current_time = pygame.time.get_ticks()
+            if current_time - self.last_frame_time > 150:  # Czas między klatkami
+                self.last_frame_time = current_time
+                self.current_frame = (self.current_frame + 1) % len(self.walk_frames)
+            self.image = self.walk_frames[self.current_frame]
+        else:  # Obraz w stanie bezruchu
+            self.image = self.idle_image
+
+        # Obrót w zależności od kierunku
+        if self.facing_left:
+            self.image = pygame.transform.flip(self.image, True, False)
+
+    def move(self, dx, dy, game_map):
+        """Ruch gracza."""
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_move_time >= self.move_delay:
+            new_x = self.x + dx
+            new_y = self.y + dy
+
+            if 0 <= new_x < len(game_map[0]) and 0 <= new_y < len(game_map):
+                self.x = new_x
+                self.y = new_y
+                self.moving = True  # Gracz się porusza
+            else:
+                self.moving = False  # Gracz nie porusza się
+
+            self.facing_left = dx < 0  # Aktualizacja kierunku patrzenia
+            self.last_move_time = current_time
+        else:
+            self.moving = False  # Gracz nie porusza się
+
+    def pick_item(self, items):
+        """Zbieranie przedmiotu."""
+        for item in items[:]:
+            if self.x == item.x and self.y == item.y:
+                if item.item_type.startswith("weapon"):
+                    weapon_names = {
+                        "weapon1": "wooden sword",
+                        "weapon2": "bronze sword",
+                        "weapon3": "silver sword"
+                    }
+                    weapon_name = weapon_names.get(item.item_type, item.item_type)
+                    if weapon_name not in self.inventory["weapons"]:
+                        self.inventory["weapons"].append(weapon_name)
+                    print(f"Picked up weapon: {weapon_name}")
+                elif item.item_type == "shield1":
+                    self.inventory["shield"] = "basic shield"
+                    self.apply_shield_effect()
+                    print(f"Picked up shield: basic shield")
+                items.remove(item)
 
     def throw_holy_water(self, holy_waters):
         """Rzucanie Holy Water, jeśli odblokowane."""
@@ -118,6 +190,74 @@ class Player:
         self.level += 1
         self.next_level_exp += 50  # Zwiększ wymagane EXP do następnego poziomu
         self.show_level_up_dialog()
+
+    def apply_weapon_effect(self):
+        """Zastosowanie efektu wybranej broni."""
+        # Mapowanie nazw broni na bonusy
+        weapon_bonuses = {
+            "wooden sword": 5,
+            "bronze sword": 10,
+            "silver sword": 15,
+        }
+
+        # Odejmij bonus poprzedniej broni
+        if hasattr(self, 'previous_weapon') and self.previous_weapon in weapon_bonuses:
+            self.damage -= weapon_bonuses[self.previous_weapon]
+
+        # Dodaj bonus dla aktualnie wyposażonej broni
+        if self.equipped_weapon in weapon_bonuses:
+            self.damage += weapon_bonuses[self.equipped_weapon]
+
+        # Zaktualizuj poprzednią broń
+        self.previous_weapon = self.equipped_weapon
+
+        print(f"Wybrano broń: {self.equipped_weapon}, obrażenia gracza: {self.damage}")
+
+    def apply_shield_effect(self):
+        """Zastosowanie efektu tarczy."""
+        if self.inventory['shield'] == "basic shield":
+            self.defense = 2  # Przykładowa wartość obrony dla tarczy
+        else:
+            self.defense = 0  # Brak tarczy oznacza brak bonusu obrony
+        print(f"Obrona gracza została ustawiona na: {self.defense}")
+
+    def draw_inventory(self, surface):
+        """Rysowanie ekwipunku gracza w lewym górnym rogu ekranu z obrazkami."""
+        font = pygame.font.Font(None, 24)
+        x = 10  # Punkt początkowy blisko lewej krawędzi
+        y = 10  # Punkt początkowy blisko górnej krawędzi
+
+        # Mapowanie broni na pliki graficzne
+        weapon_images = {
+            "wooden sword": "weapon1.png",
+            "bronze sword": "weapon2.png",
+            "silver sword": "weapon3.png",
+        }
+
+        # Wyświetl bronie
+        for weapon in self.inventory["weapons"]:
+            weapon_text = font.render(weapon, True, WHITE)
+            weapon_file = weapon_images.get(weapon)  # Pobierz nazwę pliku
+            if weapon_file:
+                weapon_img = pygame.image.load(weapon_file).convert_alpha()
+                weapon_img = pygame.transform.scale(weapon_img, (32, 32))
+                surface.blit(weapon_img, (x, y))
+            surface.blit(weapon_text, (x + 40, y + 5))
+            y += 40
+
+        # Wyświetl aktualnie wyposażoną broń
+        if self.equipped_weapon:
+            equipped_text = font.render(f"Equipped: {self.equipped_weapon}", True, WHITE)
+            surface.blit(equipped_text, (x, y))
+            y += 30  # Przesuń na kolejną linię
+
+        # Wyświetl tarczę
+        if self.inventory["shield"]:
+            shield_text = font.render(f"Shield: {self.inventory['shield']}", True, WHITE)
+            shield_img = pygame.image.load("shield1.png").convert_alpha()
+            shield_img = pygame.transform.scale(shield_img, (32, 32))
+            surface.blit(shield_img, (x, y))
+            surface.blit(shield_text, (x + 40, y + 5))
 
     def show_level_up_dialog(self):
         """Wyświetlanie okna dialogowego wyboru nagrody."""
@@ -186,27 +326,20 @@ class Player:
             self.last_shoot_time = current_time
             dx, dy = direction
 
+            # Ustaw kierunek patrzenia postaci na podstawie strzału
+            if dx < 0:  # Strzał w lewo
+                self.facing_left = True
+            elif dx > 0:  # Strzał w prawo
+                self.facing_left = False
+
             # Początkowa pozycja pocisku: środek gracza
-            projectile_x = self.x * TILE_SIZE + TILE_SIZE*3 // 2
-            projectile_y = self.y * TILE_SIZE + TILE_SIZE*3 // 2
+            projectile_x = self.x * TILE_SIZE + TILE_SIZE * 2 // 2
+            projectile_y = self.y * TILE_SIZE + TILE_SIZE * 2 // 2
 
             # Tworzenie pocisku
             projectile = Projectile(projectile_x, projectile_y, dx, dy, speed=10)
             projectiles.append(projectile)
 
-    def move(self, dx, dy, game_map):
-        """Ograniczenie ruchu gracza w czasie"""
-        current_time = pygame.time.get_ticks()
-        if current_time - self.last_move_time >= self.move_delay:  # Ruch co move_delay ms
-            new_x = self.x + dx
-            new_y = self.y + dy
-
-            # Sprawdzamy, czy nowa pozycja mieści się w granicach mapy
-            if 0 <= new_x < len(game_map[0]) and 0 <= new_y < len(game_map):
-                self.x = new_x
-                self.y = new_y
-
-            self.last_move_time = current_time  # Aktualizacja czasu ostatniego ruchu
 
     def take_damage(self, damage):
         """Metoda do otrzymywania obrażeń"""
@@ -244,8 +377,8 @@ class Player:
         surface.blit(self.image, (screen_x, screen_y))
 
         # Rysowanie paska HP nad postacią
-        pygame.draw.rect(surface, RED, (screen_x, screen_y - 10, TILE_SIZE*3, 5))
-        pygame.draw.rect(surface, GREEN, (screen_x, screen_y - 10, TILE_SIZE*3 * (self.hp / self.max_hp), 5))
+        pygame.draw.rect(surface, RED, (screen_x, screen_y - 10, TILE_SIZE * 2, 5))
+        pygame.draw.rect(surface, GREEN, (screen_x, screen_y - 10, TILE_SIZE * 2 * (self.hp / self.max_hp), 5))
 
 class HolyWater:
     def __init__(self, x, y, damage, aoe):
@@ -289,20 +422,47 @@ class Enemy:
         self.y = y
         self.hp = hp
         self.damage = damage
-        self.color = (255, 0, 0)
         self.move_delay = 500  # Czas między ruchami w ms
         self.last_move_time = pygame.time.get_ticks()
-        self.respawn_delay = random.randint(1000, 3000)  # Losowy czas respawnu (5-15 sekund)
+        self.respawn_delay = random.randint(1000, 3000)
         self.last_respawn_time = pygame.time.get_ticks()
         self.is_dead = False  # Czy przeciwnik jest martwy
+        self.drop_chance = 1  # Szansa na zrzucenie przedmiotu (30%)
 
-        self.image = pygame.image.load("3.png").convert_alpha()
-        self.image = pygame.transform.scale(self.image, (TILE_SIZE*3, TILE_SIZE*3))  # Dopasuj do TILE_SIZE
+        # Rozmiar docelowy dla wszystkich klatek animacji
+        self.target_size = (TILE_SIZE * 2, TILE_SIZE * 2)
+
+        # Animacja chodzenia
+        self.walk_frames = [
+            pygame.transform.scale(
+                pygame.image.load(f"enemywalk{i}.png").convert_alpha(), self.target_size
+            )
+            for i in range(1, 4)  # enemywalk1.png, enemywalk2.png, enemywalk3.png
+        ]
+        self.current_frame = 0
+        self.image = self.walk_frames[0]  # Początkowy ,obraz
+        self.animation_speed = 100  # Czas między klatkami w ms
+        self.last_frame_time = pygame.time.get_ticks()
+
+    def drop_item(self, items):
+        """Losowanie i dodawanie przedmiotu po śmierci."""
+        print(f"Przeciwnik zginął na pozycji ({self.x}, {self.y})")
+        if random.random() < self.drop_chance:
+            item_type = random.choice(["weapon1", "weapon2", "weapon3", "shield1"])
+            items.append(Item(self.x, self.y, item_type))
+            print(f"Przedmiot {item_type} został zrzucony na pozycji ({self.x}, {self.y})")
+    def update_animation(self):
+        """Aktualizuje animację przeciwnika."""
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_frame_time >= self.animation_speed:
+            self.last_frame_time = current_time
+            self.current_frame = (self.current_frame + 1) % len(self.walk_frames)
+            self.image = self.walk_frames[self.current_frame]
 
     def move_towards_player(self, player):
-        """Poruszanie się przeciwnika w kierunku gracza"""
+        """Poruszanie się przeciwnika w kierunku gracza."""
         if self.is_dead:
-            return  # Martwy przeciwnik się nie porusza
+            return
 
         current_time = pygame.time.get_ticks()
         if current_time - self.last_move_time >= self.move_delay:
@@ -310,9 +470,9 @@ class Enemy:
             dx = player.x - self.x
             dy = player.y - self.y
 
-            if abs(dx) > abs(dy):  # Ruch w poziomie
+            if abs(dx) > abs(dy):
                 self.x += 1 if dx > 0 else -1
-            else:  # Ruch w pionie
+            else:
                 self.y += 1 if dy > 0 else -1
 
     def take_damage(self, damage):
@@ -351,6 +511,22 @@ class Enemy:
         return center_x, center_y
 
     def draw(self, surface, camera):
+        self.update_animation()  # Aktualizuj animację przed rysowaniem
+        screen_x, screen_y = camera.apply(self.x, self.y)
+        surface.blit(self.image, (screen_x, screen_y))
+
+
+class Item:
+    def __init__(self, x, y, item_type):
+        self.x = x  # Pozycja na mapie (w kratkach)
+        self.y = y
+        self.item_type = item_type  # Typ przedmiotu, np. "weapon1", "shield1"
+        # Ładowanie obrazu na podstawie typu
+        self.image = pygame.image.load(f"{item_type}.png").convert_alpha()
+        self.image = pygame.transform.scale(self.image, (TILE_SIZE, TILE_SIZE))
+
+    def draw(self, surface, camera):
+        """Rysowanie przedmiotu na mapie."""
         screen_x, screen_y = camera.apply(self.x, self.y)
         surface.blit(self.image, (screen_x, screen_y))
 
@@ -489,6 +665,48 @@ def draw_background(surface):
     surface.blit(background, (0, 0))
 
 
+def show_weapon_selection(self):
+    """Wyświetla interfejs wyboru broni."""
+    font = pygame.font.Font(None, 36)
+    running = True
+    while running:
+        screen.fill(BLACK)
+
+        # Nagłówek
+        header_text = font.render("Choose your weapon:", True, WHITE)
+        screen.blit(header_text, (WIDTH // 2 - header_text.get_width() // 2, HEIGHT // 2 - 100))
+
+        # Wyświetlanie broni
+        for i, weapon in enumerate(self.inventory["weapons"]):
+            weapon_text = font.render(f"{i + 1}: {weapon}", True, WHITE)
+            screen.blit(weapon_text, (WIDTH // 2 - weapon_text.get_width() // 2, HEIGHT // 2 - 50 + i * 30))
+
+        # Opcja wyjścia
+        exit_text = font.render("0: Exit selection", True, WHITE)
+        screen.blit(exit_text, (WIDTH // 2 - exit_text.get_width() // 2, HEIGHT // 2 + 50 + len(self.inventory["weapons"]) * 30))
+
+        pygame.display.flip()
+
+        # Obsługa zdarzeń
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_0:
+                    running = False
+                elif pygame.K_1 <= event.key <= pygame.K_9:
+                    index = event.key - pygame.K_1
+                    if 0 <= index < len(self.inventory["weapons"]):
+                        self.equipped_weapon = self.inventory["weapons"][index]
+                        self.apply_weapon_effect()
+                        print(f"Wybrana broń: {self.equipped_weapon}")
+                        running = False
+
+
+
+
+
 # Główna funkcja gry
 def main():
     clock = pygame.time.Clock()
@@ -508,6 +726,7 @@ def main():
 
     projectiles = []  # Lista pocisków
     minimap_size = (200, 150)  # Rozmiar minimapy
+    items = []
 
     # Sterowanie liczbą przeciwników
     max_enemies = 10
@@ -515,23 +734,32 @@ def main():
     last_spawn_time = pygame.time.get_ticks()
 
     # Pętla gry
-    # Pętla gry
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
 
+
         # Sterowanie graczem
+        moving = False
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP]:
             player.move(0, -1, game_map)
+            moving = True
         if keys[pygame.K_DOWN]:
             player.move(0, 1, game_map)
+            moving = True
         if keys[pygame.K_LEFT]:
             player.move(-1, 0, game_map)
+            moving = True
         if keys[pygame.K_RIGHT]:
             player.move(1, 0, game_map)
+            moving = True
+        if keys[pygame.K_i]:
+            show_weapon_selection(player)
+
+        player.update_animation(moving)
 
         # Strzelanie pociskami
         if keys[pygame.K_w]:
@@ -553,9 +781,13 @@ def main():
             last_spawn_time = current_time
             enemies.append(Enemy(random.randint(0, MAP_WIDTH - 1), random.randint(0, MAP_HEIGHT - 1), 50, 10))
 
+        player.pick_item(items)
+
         # Aktualizacja pozycji przeciwników
-        for enemy in enemies:
+        for enemy in enemies[:]:  # Iterujemy po kopii listy
             enemy.move_towards_player(player)
+            if enemy.hp <= 0 and not enemy.is_dead:  # Sprawdzanie śmierci przeciwnika
+                enemy.is_dead = True
 
         # Ruch pocisków i sprawdzanie kolizji
         for projectile in projectiles[:]:
@@ -576,7 +808,9 @@ def main():
                     enemy.take_damage(player.damage)
                     if enemy.hp <= 0:  # Jeśli przeciwnik zginął, usuń go
                         player.gain_exp(20)
-                        enemies.remove(enemy)
+                        enemy.drop_item(items)  # Zrzucanie przedmiotu
+                        print(f"Aktualna lista przedmiotów: {[item.item_type for item in items]}")
+                        enemies.remove(enemy)  # Usuwamy przeciwnika z listy
                     projectiles.remove(projectile)
                     break
 
@@ -605,6 +839,12 @@ def main():
         # Rysowanie mapy w oparciu o kafelki
         draw_map(screen, game_map, camera)
 
+        for item in items:
+            item.draw(screen, camera)
+
+        for enemy in enemies:
+            enemy.draw(screen, camera)
+
         # Rysowanie obiektów gry
         for enemy in enemies:
             enemy.draw(screen, camera)
@@ -626,6 +866,7 @@ def main():
                 holy_waters.remove(holy_water)  # Usuń, jeśli czas działania upłynął
 
         Player.draw_xp_bar(screen,player)
+        player.draw_inventory(screen)
         # Aktualizacja wyświetlacza
         pygame.display.flip()
         clock.tick(60)

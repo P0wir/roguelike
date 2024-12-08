@@ -71,9 +71,13 @@ class Player:
         self.last_holy_water_time = 0  # Czas ostatniego rzutu Holy Water
         self.inventory = {"weapons": [], "shield": None}  # Ekwipunek gracza
         self.equipped_weapon = None  # Aktualnie wyposażona broń
+        self.quest_target = random.randint(5, 15)  # Liczba nietoperzy do pokonania
+        self.quest_progress = 0  # Postęp w aktualnym zadaniu
+        self.bats_defeated = 0
 
         # Doświadczenie
         self.exp = 0
+        self.bats_defeated = 0
         self.level = 1
         self.next_level_exp = 100
 
@@ -298,6 +302,15 @@ class Player:
                         self.upgrade_holy_water()
                         running = False
 
+    def check_quest_completion(self):
+        """Sprawdzanie, czy zadanie zostało ukończone."""
+        if self.quest_progress >= self.quest_target:
+            print(f"Quest completed! Defeat {self.quest_target} bats.")
+            self.gain_exp(self.next_level_exp // 2)  # Dodaj 50% punktów do kolejnego poziomu
+            self.quest_target = random.randint(5, 15)  # Nowy cel
+            self.quest_progress = 0  # Zresetuj postęp
+            print(f"New quest: Defeat {self.quest_target} bats!")
+
     def draw_xp_bar(surface, player):
         """Rysowanie paska doświadczenia."""
         bar_width = WIDTH - 20  # Szerokość paska (mniej niż szerokość ekranu)
@@ -319,6 +332,15 @@ class Player:
         font = pygame.font.Font(None, 24)
         text = font.render(f"Level {player.level}", True, WHITE)
         surface.blit(text, (x + 5, y - 25))
+
+    def draw_quest_status(self, surface, minimap_x, minimap_y, minimap_width, minimap_height):
+        """Rysowanie statusu zadania pod minimapą w prawym górnym rogu."""
+        font = pygame.font.Font(None, 24)
+        quest_x = minimap_x  # Pozycja X zgodna z minimapą
+        quest_y = minimap_y + minimap_height + 10  # Pozycja Y poniżej minimapy
+
+        quest_text = font.render(f"Quest: Defeat {self.quest_progress}/{self.quest_target} bats", True, WHITE)
+        surface.blit(quest_text, (quest_x, quest_y))
 
     def shoot(self, projectiles, direction):
         current_time = pygame.time.get_ticks()
@@ -360,14 +382,6 @@ class Player:
         self.hp = min(self.hp + amount, self.max_hp)
         print(f"Gracz wyleczony do {self.hp}/{self.max_hp} HP.")
 
-    def auto_attack(self, enemies):
-        """Automatyczne atakowanie przeciwników w zasięgu"""
-        current_time = pygame.time.get_ticks()
-        if current_time - self.last_attack_time >= 1000:  # Atak co 1 sekundę
-            self.last_attack_time = current_time
-            for enemy in enemies:
-                if abs(self.x - enemy.x) <= 1 and abs(self.y - enemy.y) <= 1:  # Wrogowie w zasięgu 1 kratki
-                    self.attack(enemy)
 
     def draw(self, surface, camera):
         # Przekształć pozycję gracza w pozycję względem kamery
@@ -411,10 +425,74 @@ class HolyWater:
             enemy_center_x, enemy_center_y = enemy.get_center()
             distance = ((self.x - enemy_center_x) ** 2 + (self.y - enemy_center_y) ** 2) ** 0.5
             if distance <= self.aoe:
-                enemy.take_damage(self.damage)
+                enemy.take_damage(self.damage, player)  # Dodano przekazanie player
                 if enemy.hp <= 0:  # Jeśli przeciwnik zginął
                     enemies.remove(enemy)  # Usuń przeciwnika z listy
                     player.gain_exp(20)  # Przyznaj doświadczenie graczowi
+                    player.quest_progress += 1  # Zwiększ postęp zadania
+                    player.check_quest_completion()  # Sprawdź, czy zadanie jest ukończone
+
+class ExplosiveBlock:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.is_active = True
+        self.explosion_time = None  # Czas rozpoczęcia eksplozji
+        self.explosion_duration = 1000  # Czas trwania eksplozji w ms
+        self.explosion_tiles = []  # Pola objęte eksplozją
+
+        # Załaduj obrazek bloku wybuchającego
+        self.block_image = pygame.image.load("explo.png").convert_alpha()
+        self.block_image = pygame.transform.scale(self.block_image, (TILE_SIZE, TILE_SIZE))
+
+        # Załaduj obrazek eksplozji
+        self.explosion_image = pygame.image.load("explo2.png").convert_alpha()
+        self.explosion_image = pygame.transform.scale(self.explosion_image, (TILE_SIZE, TILE_SIZE))
+
+    def draw(self, surface, camera):
+        if self.is_active:
+            # Rysuj blok, jeśli jest aktywny
+            screen_x, screen_y = camera.apply(self.x, self.y)
+            surface.blit(self.block_image, (screen_x, screen_y))
+        elif self.explosion_time:
+            # Rysuj eksplozję, jeśli została zainicjowana
+            current_time = pygame.time.get_ticks()
+            if current_time - self.explosion_time <= self.explosion_duration:
+                for tile in self.explosion_tiles:
+                    screen_x, screen_y = camera.apply(tile[0], tile[1])
+                    surface.blit(self.explosion_image, (screen_x, screen_y))
+
+    def explode(self, enemies, player):
+        if not self.is_active:
+            return
+
+        self.is_active = False
+        self.explosion_time = pygame.time.get_ticks()  # Zapisz czas rozpoczęcia eksplozji
+        explosion_range = 5
+
+        # Określ pola objęte eksplozją
+        self.explosion_tiles = [
+            (self.x + dx, self.y + dy)
+            for dx in range(-explosion_range, explosion_range + 1)
+            for dy in range(-explosion_range, explosion_range + 1)
+            if 0 <= self.x + dx < MAP_WIDTH and 0 <= self.y + dy < MAP_HEIGHT
+        ]
+
+        for enemy in enemies[:]:
+            if (enemy.x, enemy.y) in self.explosion_tiles:
+                enemy.take_damage(50, player)  # Przekazanie player jako argument
+                if enemy.hp <= 0:
+                    enemies.remove(enemy)
+                    player.gain_exp(20)
+                    player.quest_progress += 1  # Zwiększ postęp zadania
+                    player.check_quest_completion()  # Sprawdź, czy zadanie jest ukończone
+
+    def update(self):
+        """Sprawdź, czy eksplozja się zakończyła."""
+        if self.explosion_time:
+            current_time = pygame.time.get_ticks()
+            if current_time - self.explosion_time > self.explosion_duration:
+                self.explosion_time = None  # Eksplozja zakończona
 
 class Enemy:
     def __init__(self, x, y, hp, damage):
@@ -475,7 +553,7 @@ class Enemy:
             else:
                 self.y += 1 if dy > 0 else -1
 
-    def take_damage(self, damage):
+    def take_damage(self, damage, player):
         """Otrzymanie obrażeń"""
         if self.is_dead:
             return  # Martwy przeciwnik nie otrzymuje obrażeń
@@ -485,7 +563,8 @@ class Enemy:
         if self.hp <= 0:
             self.is_dead = True  # Oznacz jako martwego
             self.last_respawn_time = pygame.time.get_ticks()  # Ustaw czas "śmierci"
-            print("Przeciwnik zginął!")
+            player.bats_defeated += 1  # Zwiększ licznik pokonanych nietoperzy
+            print(f"Przeciwnik zginął! Liczba pokonanych nietoperzy: {player.bats_defeated}")
 
     def should_respawn(self):
         """Sprawdzenie, czy przeciwnik powinien się zrespawnować"""
@@ -552,13 +631,6 @@ class Projectile:
         screen_y = int(self.y - camera.y_offset)
         pygame.draw.circle(surface, self.color, (screen_x, screen_y), self.size)
 
-
-
-# Funkcja generowania mapy
-def generate_map(width, height):
-    return [[random.choice([0, 0, 0, 1]) for _ in range(width)] for _ in range(height)]
-
-
 def draw_map(surface, game_map, camera):
     # Załaduj obraz tła i przeskaluj go do rozmiarów całej mapy
     grass_tile = pygame.image.load("grass6.png").convert_alpha()
@@ -571,8 +643,8 @@ def draw_map(surface, game_map, camera):
 
 
 
-def draw_minimap(surface, game_map, player, enemies, minimap_size):
-    """Rysowanie minimapy w rogu ekranu."""
+def draw_minimap(surface, game_map, player, enemies, minimap_size, x, y):
+    """Rysowanie minimapy w określonym miejscu na ekranie."""
     if not game_map or not game_map[0]:  # Jeśli mapa jest pusta, nie rysujemy
         return
 
@@ -585,24 +657,25 @@ def draw_minimap(surface, game_map, player, enemies, minimap_size):
     tile_height = minimap_height // map_height
 
     # Rysowanie mapy
-    for y, row in enumerate(game_map):
-        for x, tile in enumerate(row):
+    for row_y, row in enumerate(game_map):
+        for col_x, tile in enumerate(row):
             color = GRAY if tile == 1 else BLACK
             pygame.draw.rect(surface, color,
-                             (x * tile_width, y * tile_height, tile_width, tile_height))
+                             (x + col_x * tile_width, y + row_y * tile_height, tile_width, tile_height))
 
     # Rysowanie gracza na minimapie
     pygame.draw.rect(surface, GREEN,
-                     (player.x * tile_width, player.y * tile_height, tile_width, tile_height))
+                     (x + player.x * tile_width, y + player.y * tile_height, tile_width, tile_height))
 
     # Rysowanie przeciwników na minimapie
     for enemy in enemies:
         if not enemy.is_dead:  # Tylko żywi przeciwnicy
             pygame.draw.rect(surface, RED,
-                             (enemy.x * tile_width, enemy.y * tile_height, tile_width, tile_height))
+                             (x + enemy.x * tile_width, y + enemy.y * tile_height, tile_width, tile_height))
 
     # Obramowanie minimapy
-    pygame.draw.rect(surface, WHITE, (0, 0, minimap_width, minimap_height), 2)
+    pygame.draw.rect(surface, WHITE, (x, y, minimap_width, minimap_height), 2)
+
 
 
 def show_death_screen():
@@ -710,6 +783,7 @@ def show_weapon_selection(self):
 # Główna funkcja gry
 def main():
     clock = pygame.time.Clock()
+    last_block_bats_defeated = 0  # Śledzenie liczby pokonanych nietoperzy przy ostatnim dodaniu bloku
 
     MAP_WIDTH = 50  # Szerokość mapy w kafelkach
     MAP_HEIGHT = 50  # Wysokość mapy w kafelkach
@@ -718,6 +792,7 @@ def main():
     grass_tile = pygame.image.load("grass6.png")
     grass_tile = pygame.transform.scale(grass_tile, (TILE_SIZE, TILE_SIZE))
     holy_waters = []  # Lista aktywnych Holy Water
+    blocks = []
 
     game_map = generate_map_vampire_style(MAP_WIDTH, MAP_HEIGHT)
     player = Player(10, 10)
@@ -788,10 +863,17 @@ def main():
             enemy.move_towards_player(player)
             if enemy.hp <= 0 and not enemy.is_dead:  # Sprawdzanie śmierci przeciwnika
                 enemy.is_dead = True
+                player.bats_defeated += 1
 
         # Ruch pocisków i sprawdzanie kolizji
         for projectile in projectiles[:]:
             projectile.move()  # Pocisk się porusza
+
+            for block in blocks:
+                if block.is_active and projectile.x // TILE_SIZE == block.x and projectile.y // TILE_SIZE == block.y:
+                    block.explode(enemies, player)  # Wywołanie eksplozji
+                    projectiles.remove(projectile)
+                    break
 
             # Sprawdź, czy pocisk jest w granicach mapy
             if not (0 <= projectile.x <= MAP_WIDTH * TILE_SIZE and
@@ -805,12 +887,14 @@ def main():
                 tolerance = TILE_SIZE // 2  # Tolerancja na trafienie
                 if abs(projectile.x - enemy_center_x) <= tolerance and \
                         abs(projectile.y - enemy_center_y) <= tolerance:
-                    enemy.take_damage(player.damage)
+                    enemy.take_damage(player.damage, player)  # Dodano przekazanie player
                     if enemy.hp <= 0:  # Jeśli przeciwnik zginął, usuń go
                         player.gain_exp(20)
                         enemy.drop_item(items)  # Zrzucanie przedmiotu
                         print(f"Aktualna lista przedmiotów: {[item.item_type for item in items]}")
                         enemies.remove(enemy)  # Usuwamy przeciwnika z listy
+                        player.quest_progress += 1  # Zwiększ postęp zadania
+                        player.check_quest_completion()
                     projectiles.remove(projectile)
                     break
 
@@ -845,17 +929,16 @@ def main():
         for enemy in enemies:
             enemy.draw(screen, camera)
 
+        if player.bats_defeated % 5 == 0 and player.bats_defeated > last_block_bats_defeated:
+            blocks.append(ExplosiveBlock(random.randint(1, MAP_WIDTH - 2), random.randint(1, MAP_HEIGHT - 2)))
+            last_block_bats_defeated = player.bats_defeated  # Aktualizacja liczby pokonanych nietoperzy
+
         # Rysowanie obiektów gry
         for enemy in enemies:
             enemy.draw(screen, camera)
         for projectile in projectiles:
             projectile.draw(screen, camera)
         player.draw(screen, camera)
-
-        # Rysowanie minimapy
-        minimap_surface = pygame.Surface(minimap_size)
-        draw_minimap(minimap_surface, game_map, player, enemies, minimap_size)
-        screen.blit(minimap_surface, (WIDTH - minimap_size[0] - 10, 10))
 
         # Obsługa i rysowanie Holy Water
         for holy_water in holy_waters[:]:
@@ -867,9 +950,20 @@ def main():
 
         Player.draw_xp_bar(screen,player)
         player.draw_inventory(screen)
+        minimap_x = WIDTH - minimap_size[0] - 10
+        minimap_y = 10
+        draw_minimap(screen, game_map, player, enemies, minimap_size, minimap_x, minimap_y)
+
+        player.draw_quest_status(screen, minimap_x, minimap_y, minimap_size[0], minimap_size[1])
+
+        for block in blocks[:]:
+            block.update()
+            block.draw(screen, camera)
+
         # Aktualizacja wyświetlacza
         pygame.display.flip()
         clock.tick(60)
+        print(blocks)
 
     pygame.quit()
     exit()

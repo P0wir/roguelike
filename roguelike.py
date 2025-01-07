@@ -778,6 +778,67 @@ def show_weapon_selection(self):
 
 
 
+def show_main_menu():
+    """Shows main menu."""
+    font = pygame.font.Font(None, 72)
+    small_font = pygame.font.Font(None, 36)
+
+    while True:
+        screen.fill(BLACK)
+
+        # Teksty na ekranie menu
+        title_text = font.render("Roguelike Game", True, WHITE)
+        start_text = small_font.render("Press S to Start", True, WHITE)
+        exit_text = small_font.render("Press Q to Quit", True, WHITE)
+
+        # Wyświetlanie tekstów
+        screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 2 - 100))
+        screen.blit(start_text, (WIDTH // 2 - start_text.get_width() // 2, HEIGHT // 2))
+        screen.blit(exit_text, (WIDTH // 2 - exit_text.get_width() // 2, HEIGHT // 2 + 50))
+
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_s:  # Start gry
+                    return True  # Rozpocznij grę
+                elif event.key == pygame.K_q:  # Wyjście z gry
+                    pygame.quit()
+                    exit()
+
+def show_pause_menu():
+    """Shows pause menu when ESC is pressed."""
+    font = pygame.font.Font(None, 72)
+    small_font = pygame.font.Font(None, 36)
+
+    while True:
+        screen.fill(BLACK)
+
+        # pause menu
+        title_text = font.render("Paused", True, WHITE)
+        resume_text = small_font.render("Press R to Resume", True, WHITE)
+        quit_text = small_font.render("Press Q to Quit", True, WHITE)
+
+        # show text
+        screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 2 - 100))
+        screen.blit(resume_text, (WIDTH // 2 - resume_text.get_width() // 2, HEIGHT // 2))
+        screen.blit(quit_text, (WIDTH // 2 - quit_text.get_width() // 2, HEIGHT // 2 + 50))
+
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    return True
+                elif event.key == pygame.K_q:
+                    pygame.quit()
+                    exit()
 
 
 # Główna funkcja gry
@@ -808,12 +869,20 @@ def main():
     spawn_interval = 2000  # Co ile milisekund spawnujemy nowego przeciwnika
     last_spawn_time = pygame.time.get_ticks()
 
+    if not show_main_menu():
+        return
+
     # Pętla gry
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if not show_pause_menu():
+                        running = False
+                        break
 
 
         # Sterowanie graczem
